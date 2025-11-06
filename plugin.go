@@ -18,7 +18,7 @@ type Config struct {
 
 func CreateConfig() *Config {
 	return &Config{
-		TokenHeader:        "X-Forwarded-Access-Token",
+		TokenHeader:        "X-Auth-Request-Access-Token",
 		CacheTTL:           300, // default 5 minutes
 		DumpHeadersOnError: false,
 	}
@@ -42,7 +42,7 @@ type RepoAuthz struct {
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	if config.TokenHeader == "" {
-		config.TokenHeader = "X-Forwarded-Access-Token"
+		config.TokenHeader = "X-Auth-Request-Access-Token"
 	}
 
 	return &RepoAuthz{
