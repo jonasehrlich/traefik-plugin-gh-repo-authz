@@ -7,3 +7,4 @@ summary: >
   This is a Traefik middleware plugin that checks whether an access token can access a GitHub repository.
 
 testData:
+  cacheTTL: 600
