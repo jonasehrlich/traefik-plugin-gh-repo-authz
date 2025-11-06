@@ -59,19 +59,19 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 }
 
 func (g *RepoAuthz) createErrorContent(msg string, req *http.Request) string {
-	if g.dumpHeadersOnError {
+	if !g.dumpHeadersOnError {
 		return msg
 
 	}
-	h, _ := json.MarshalIndent(req.Header, "  ", "  ")
+	h, _ := json.MarshalIndent(req.Header, "", "  ")
 
-	return fmt.Sprintf("%s\n%s", msg, string(h))
+	return fmt.Sprintf("%s\nHeaders:\n%v", msg, string(h))
 }
 
 func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	token := req.Header.Get(g.tokenHeader)
 	if token == "" {
-		http.Error(rw, "Missing GitHub token", http.StatusUnauthorized)
+		http.Error(rw, g.createErrorContent("Missing GitHub token", req), http.StatusUnauthorized)
 		return
 	}
 
