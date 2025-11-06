@@ -11,14 +11,16 @@ import (
 )
 
 type Config struct {
-	TokenHeader string `json:"tokenHeader"` // Header containing GitHub OAuth token
-	CacheTTL    int    `json:"cacheTTL"`    // seconds
+	TokenHeader        string `json:"tokenHeader"` // Header containing GitHub OAuth token
+	CacheTTL           int    `json:"cacheTTL"`    // seconds
+	DumpHeadersOnError bool   `json:"dumpHeadersOnError"`
 }
 
 func CreateConfig() *Config {
 	return &Config{
-		TokenHeader: "X-Forwarded-Access-Token",
-		CacheTTL:    300, // default 5 minutes
+		TokenHeader:        "X-Forwarded-Access-Token",
+		CacheTTL:           300, // default 5 minutes
+		DumpHeadersOnError: false,
 	}
 }
 
@@ -28,13 +30,14 @@ type cacheEntry struct {
 }
 
 type RepoAuthz struct {
-	next        http.Handler
-	name        string
-	tokenHeader string
-	client      *http.Client
-	cache       map[string]*cacheEntry
-	mu          sync.RWMutex
-	cacheTTL    time.Duration
+	next               http.Handler
+	name               string
+	tokenHeader        string
+	client             *http.Client
+	cache              map[string]*cacheEntry
+	mu                 sync.RWMutex
+	cacheTTL           time.Duration
+	dumpHeadersOnError bool
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -49,9 +52,20 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		cache:    make(map[string]*cacheEntry),
-		cacheTTL: time.Duration(config.CacheTTL) * time.Second,
+		cache:              make(map[string]*cacheEntry),
+		cacheTTL:           time.Duration(config.CacheTTL) * time.Second,
+		dumpHeadersOnError: config.DumpHeadersOnError,
 	}, nil
+}
+
+func (g *RepoAuthz) createErrorContent(msg string, req *http.Request) string {
+	if g.dumpHeadersOnError {
+		return msg
+
+	}
+	h, _ := json.MarshalIndent(req.Header, "  ", "  ")
+
+	return fmt.Sprintf("%s\n%s", msg, string(h))
 }
 
 func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -63,7 +77,7 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	org, repo, err := extractOrgRepo(req.URL.Path)
 	if err != nil {
-		http.Error(rw, "Invalid path, expected /<org>/<repo>/...", http.StatusBadRequest)
+		http.Error(rw, g.createErrorContent("Invalid path, expected /<org>/<repo>/...", req), http.StatusBadRequest)
 		return
 	}
 
@@ -77,7 +91,7 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		if entry.allowed {
 			g.next.ServeHTTP(rw, req)
 		} else {
-			http.Error(rw, "Forbidden", http.StatusForbidden)
+			http.Error(rw, g.createErrorContent("Forbidden", req), http.StatusForbidden)
 		}
 		return
 	}
@@ -85,7 +99,7 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// Not in cache, check GitHub
 	authorized, err := g.checkRepoAccess(token, org, repo)
 	if err != nil {
-		http.Error(rw, fmt.Sprintf("GitHub API error: %v", err), http.StatusInternalServerError)
+		http.Error(rw, g.createErrorContent(fmt.Sprintf("GitHub API error: %v", err), req), http.StatusInternalServerError)
 		return
 	}
 
@@ -100,7 +114,7 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if authorized {
 		g.next.ServeHTTP(rw, req)
 	} else {
-		http.Error(rw, "Forbidden", http.StatusForbidden)
+		http.Error(rw, g.createErrorContent("Forbidden", req), http.StatusForbidden)
 	}
 }
 
