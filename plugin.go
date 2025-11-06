@@ -75,13 +75,13 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	org, repo, err := extractOrgRepo(req.URL.Path)
+	owner, repo, err := extractOwnerAndRepo(req.URL.Path)
 	if err != nil {
-		http.Error(rw, g.createErrorContent("Invalid path, expected /<org>/<repo>/...", req), http.StatusBadRequest)
+		http.Error(rw, g.createErrorContent("Invalid path, expected /<owner>/<repo>/...", req), http.StatusBadRequest)
 		return
 	}
 
-	cacheKey := fmt.Sprintf("%s|%s|%s", token, org, repo)
+	cacheKey := fmt.Sprintf("%s|%s|%s", token, owner, repo)
 
 	// Check cache
 	g.mu.RLock()
@@ -91,13 +91,13 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		if entry.allowed {
 			g.next.ServeHTTP(rw, req)
 		} else {
-			http.Error(rw, g.createErrorContent("Forbidden", req), http.StatusForbidden)
+			http.Error(rw, g.createErrorContent("Forbidden (cached)", req), http.StatusForbidden)
 		}
 		return
 	}
 
 	// Not in cache, check GitHub
-	authorized, err := g.checkRepoAccess(token, org, repo)
+	authorized, err := g.checkRepoAccess(token, owner, repo)
 	if err != nil {
 		http.Error(rw, g.createErrorContent(fmt.Sprintf("GitHub API error: %v", err), req), http.StatusInternalServerError)
 		return
@@ -114,11 +114,11 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if authorized {
 		g.next.ServeHTTP(rw, req)
 	} else {
-		http.Error(rw, g.createErrorContent("Forbidden", req), http.StatusForbidden)
+		http.Error(rw, g.createErrorContent("Not Found", req), http.StatusNotFound)
 	}
 }
 
-func extractOrgRepo(path string) (string, string, error) {
+func extractOwnerAndRepo(path string) (string, string, error) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 2 {
 		return "", "", fmt.Errorf("path too short")
@@ -126,8 +126,8 @@ func extractOrgRepo(path string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func (g *RepoAuthz) checkRepoAccess(token, org, repo string) (bool, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s", org, repo)
+func (g *RepoAuthz) checkRepoAccess(token, owner, repo string) (bool, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
