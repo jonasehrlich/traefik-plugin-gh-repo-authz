@@ -1,0 +1,9 @@
+displayName: GitHub Repository Authorization
+type: middleware
+
+import: github.com/jonasehrlich/traefik-plugin-gh-repo-authz
+
+summary: >
+  This is a Traefik middleware plugin that checks whether an access token can access a GitHub repository.
+
+testData:
