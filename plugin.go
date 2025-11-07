@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	GitHubAPI          string `json:"githubApi"`
 	TokenHeader        string `json:"tokenHeader"` // Header containing GitHub OAuth token
 	CacheTTL           int    `json:"cacheTTL"`    // seconds
 	DumpHeadersOnError bool   `json:"dumpHeadersOnError"`
@@ -18,6 +19,7 @@ type Config struct {
 
 func CreateConfig() *Config {
 	return &Config{
+		GitHubAPI:          "https://api.github.com",
 		TokenHeader:        "X-Auth-Request-Access-Token",
 		CacheTTL:           300, // default 5 minutes
 		DumpHeadersOnError: false,
@@ -32,6 +34,7 @@ type cacheEntry struct {
 type RepoAuthz struct {
 	next               http.Handler
 	name               string
+	githubAPI          string
 	tokenHeader        string
 	client             *http.Client
 	cache              map[string]*cacheEntry
@@ -48,6 +51,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	return &RepoAuthz{
 		next:        next,
 		name:        name,
+		githubAPI:   config.GitHubAPI,
 		tokenHeader: config.TokenHeader,
 		client: &http.Client{
 			Timeout: 5 * time.Second,
@@ -96,8 +100,8 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Not in cache, check GitHub
-	authorized, err := g.checkRepoAccess(token, owner, repo)
+	// Not in cache, check GitHub API
+	authorized, err := g.checkRepoAccess(g.githubAPI, token, owner, repo)
 	if err != nil {
 		http.Error(rw, g.createErrorContent(fmt.Sprintf("GitHub API error: %v", err), req), http.StatusInternalServerError)
 		return
@@ -126,8 +130,8 @@ func extractOwnerAndRepo(path string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func (g *RepoAuthz) checkRepoAccess(token, owner, repo string) (bool, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
+func (g *RepoAuthz) checkRepoAccess(githubApi, token, owner, repo string) (bool, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s", githubApi, owner, repo)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
