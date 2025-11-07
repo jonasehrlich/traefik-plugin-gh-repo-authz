@@ -7,8 +7,8 @@ GitHub repositories.
 When using GitHub for development it can be directly used as an oauth2 provider as well. That way
 your hosted application can inherit the permissions already configured in GitHub.
 
-> [!IMPORTANT] This Plugin requires the Oauth2 scope `repo` for Oauth2 Apps, GitHub apps were not
-> yet tested
+> [!IMPORTANT]
+> This Plugin requires the Oauth2 scope `repo` for Oauth2 Apps, GitHub apps were not yet tested
 
 This middleware allows to check whether the user accessing a path under `<owner>/<repo>` has the
 permission to access the same repository on GitHub. Internally the plugin caches the permissions to
