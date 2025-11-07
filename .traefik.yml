@@ -1,10 +1,12 @@
 displayName: GitHub Repository Authorization
 type: middleware
-
 import: github.com/jonasehrlich/traefik-plugin-gh-repo-authz
-
 summary: >
-  This is a Traefik middleware plugin that checks whether an access token can access a GitHub repository.
+  This is a Traefik middleware plugin that authorizes access for subdirectories mapping to GitHub repositories based on
+  access to the respective repository.
+
+  Authorization is done against the GitHub `/repos/<owner>/<repo>` API  using a token from the incoming request.
+
 
 testData:
   cacheTTL: 600
