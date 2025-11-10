@@ -14,7 +14,7 @@ This middleware allows to check whether the user accessing a path under `<owner>
 permission to access the same repository on GitHub. Internally the plugin caches the permissions to
 improve performance and reducing GitHub API calls.
 
-![Figure of the plugin setup within traefik]([assets/plugin-setup.drawio.svg](https://raw.githubusercontent.com/jonasehrlich/traefik-plugin-gh-repo-authz/refs/heads/main/assets/plugin-setup.drawio.svg))
+![Plugin setup within traefik](https://raw.githubusercontent.com/jonasehrlich/traefik-plugin-gh-repo-authz/refs/heads/main/assets/plugin-setup.drawio.svg)
 
 ## Configuration
 
@@ -26,7 +26,7 @@ experimental:
   plugins:
     gh-repo-authz-plugin:
       moduleName: github.com/jonasehrlich/traefik-plugin-gh-repo-authz
-      version: v0.1.0
+      version: v0.2.0
 ```
 
 The middlewares, routing and the plugin itself are configured in the
