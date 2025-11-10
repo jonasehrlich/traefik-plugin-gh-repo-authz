@@ -5,42 +5,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
 
 type Config struct {
-	GitHubAPI          string `json:"githubApi"`
-	TokenHeader        string `json:"tokenHeader"` // Header containing GitHub OAuth token
-	CacheTTL           int    `json:"cacheTTL"`    // seconds
-	DumpHeadersOnError bool   `json:"dumpHeadersOnError"`
+	GitHubAPI   string `json:"githubApi"`
+	TokenHeader string `json:"tokenHeader"` // Header containing GitHub OAuth token
+	CacheTTL    int    `json:"cacheTTL"`    // seconds
+	Debug       bool   `json:"debug"`
 }
 
 func CreateConfig() *Config {
 	return &Config{
-		GitHubAPI:          "https://api.github.com",
-		TokenHeader:        "X-Auth-Request-Access-Token",
-		CacheTTL:           300, // default 5 minutes
-		DumpHeadersOnError: false,
+		GitHubAPI:   "https://api.github.com",
+		TokenHeader: "X-Auth-Request-Access-Token",
+		CacheTTL:    300, // default 5 minutes
+		Debug:       false,
 	}
 }
 
 type cacheEntry struct {
-	allowed    bool
+	authorized bool
 	expiryTime time.Time
 }
 
 type RepoAuthz struct {
-	next               http.Handler
-	name               string
-	githubAPI          string
-	tokenHeader        string
-	client             *http.Client
-	cache              map[string]*cacheEntry
-	mu                 sync.RWMutex
-	cacheTTL           time.Duration
-	dumpHeadersOnError bool
+	next        http.Handler
+	name        string
+	githubAPI   string
+	tokenHeader string
+	client      *http.Client
+	cache       map[string]*cacheEntry
+	mu          sync.RWMutex
+	cacheTTL    time.Duration
+	debug       bool
 }
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
@@ -56,32 +57,22 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		cache:              make(map[string]*cacheEntry),
-		cacheTTL:           time.Duration(config.CacheTTL) * time.Second,
-		dumpHeadersOnError: config.DumpHeadersOnError,
+		cache:    make(map[string]*cacheEntry),
+		cacheTTL: time.Duration(config.CacheTTL) * time.Second,
+		debug:    config.Debug,
 	}, nil
-}
-
-func (g *RepoAuthz) createErrorContent(msg string, req *http.Request) string {
-	if !g.dumpHeadersOnError {
-		return msg
-
-	}
-	h, _ := json.MarshalIndent(req.Header, "", "  ")
-
-	return fmt.Sprintf("%s\nHeaders:\n%v", msg, string(h))
 }
 
 func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	token := req.Header.Get(g.tokenHeader)
 	if token == "" {
-		http.Error(rw, g.createErrorContent("Missing GitHub token", req), http.StatusUnauthorized)
+		g.httpError(rw, req, "Missing GitHub token", http.StatusUnauthorized)
 		return
 	}
 
 	owner, repo, err := extractOwnerAndRepo(req.URL.Path)
 	if err != nil {
-		http.Error(rw, g.createErrorContent("Invalid path, expected /<owner>/<repo>/...", req), http.StatusBadRequest)
+		g.httpError(rw, req, "Invalid path, expected /<owner>/<repo>/...", http.StatusBadRequest)
 		return
 	}
 
@@ -92,10 +83,10 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	entry, ok := g.cache[cacheKey]
 	g.mu.RUnlock()
 	if ok && time.Now().Before(entry.expiryTime) {
-		if entry.allowed {
+		if entry.authorized {
 			g.next.ServeHTTP(rw, req)
 		} else {
-			http.Error(rw, g.createErrorContent("Forbidden (cached)", req), http.StatusForbidden)
+			g.httpError(rw, req, "Forbidden (cached)", http.StatusForbidden)
 		}
 		return
 	}
@@ -103,14 +94,14 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	// Not in cache, check GitHub API
 	authorized, err := g.checkRepoAccess(g.githubAPI, token, owner, repo)
 	if err != nil {
-		http.Error(rw, g.createErrorContent(fmt.Sprintf("GitHub API error: %v", err), req), http.StatusInternalServerError)
+		g.httpError(rw, req, fmt.Sprintf("GitHub API error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Update cache
 	g.mu.Lock()
 	g.cache[cacheKey] = &cacheEntry{
-		allowed:    authorized,
+		authorized: authorized,
 		expiryTime: time.Now().Add(g.cacheTTL),
 	}
 	g.mu.Unlock()
@@ -118,10 +109,24 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if authorized {
 		g.next.ServeHTTP(rw, req)
 	} else {
-		http.Error(rw, g.createErrorContent("Not Found", req), http.StatusNotFound)
+		g.httpError(rw, req, "Forbidden", http.StatusForbidden)
 	}
 }
 
+// Write a HTTP error to the response writer. If g.debugMode is set to true the requested response
+// will be written, if g.debugMode is false, a generic 404 will be sent
+func (g *RepoAuthz) httpError(rw http.ResponseWriter, req *http.Request, error string, code int) {
+	os.Stdout.WriteString(error)
+	if g.debug {
+		h, _ := json.MarshalIndent(req.Header, "", "  ")
+		http.Error(rw, fmt.Sprintf("%s\nRequest Headers:\n%s", error, h), code)
+		return
+	}
+	http.Error(rw, "Not Found", http.StatusNotFound)
+
+}
+
+// Extract owner and repository from the request path
 func extractOwnerAndRepo(path string) (string, string, error) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) < 2 {
@@ -130,6 +135,7 @@ func extractOwnerAndRepo(path string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+// Check if a token has access to a repository through the GitHub API.
 func (g *RepoAuthz) checkRepoAccess(githubApi, token, owner, repo string) (bool, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", githubApi, owner, repo)
 
@@ -156,6 +162,6 @@ func (g *RepoAuthz) checkRepoAccess(githubApi, token, owner, repo string) (bool,
 	default:
 		var githubErr map[string]any
 		_ = json.NewDecoder(resp.Body).Decode(&githubErr)
-		return false, fmt.Errorf("unexpected status %d: %v", resp.StatusCode, githubErr)
+		return false, fmt.Errorf("GitHub API error %d: %v", resp.StatusCode, githubErr)
 	}
 }

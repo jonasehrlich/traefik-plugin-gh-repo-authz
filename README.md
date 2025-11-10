@@ -49,8 +49,10 @@ http:
           tokenHeader: X-Auth-Request-Access-Token
           # TTL of the cache entries in seconds
           cacheTTL: 300
-          # DO NOT SET TO TRUE IN PRODUCTION: Will dump headers to the HTTP error response for debugging
-          dumpHeadersOnError: false
+          # WARNING: Do not set this to true in production. This will:
+          # - Dump request headers to the HTTP error response
+          # - Expose the GitHub API response
+          debug: false
 
   routers:
     protected-router:
