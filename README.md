@@ -49,6 +49,8 @@ http:
           tokenHeader: X-Auth-Request-Access-Token
           # TTL of the cache entries in seconds
           cacheTTL: 300
+          # Static prefix of the path to be authorized
+          pathPrefix: ""
           # WARNING: Do not set this to true in production. This will:
           # - Dump request headers to the HTTP error response
           # - Expose the GitHub API response

@@ -16,6 +16,7 @@ type Config struct {
 	GitHubAPI   string `json:"githubApi"`
 	TokenHeader string `json:"tokenHeader"` // Header containing GitHub OAuth token
 	CacheTTL    int    `json:"cacheTTL"`    // seconds
+	PathPrefix  string `json:"pathPrefix"`
 	Debug       bool   `json:"debug"`
 }
 
@@ -24,6 +25,7 @@ func CreateConfig() *Config {
 		GitHubAPI:   "https://api.github.com",
 		TokenHeader: "X-Auth-Request-Access-Token",
 		CacheTTL:    300, // default 5 minutes
+		PathPrefix:  "",
 		Debug:       false,
 	}
 }
@@ -42,6 +44,7 @@ type RepoAuthz struct {
 	cache       map[string]*cacheEntry
 	mu          sync.RWMutex
 	cacheTTL    time.Duration
+	pathPrefix  string
 	debug       bool
 }
 
@@ -58,9 +61,10 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		cache:    make(map[string]*cacheEntry),
-		cacheTTL: time.Duration(config.CacheTTL) * time.Second,
-		debug:    config.Debug,
+		cache:      make(map[string]*cacheEntry),
+		cacheTTL:   time.Duration(config.CacheTTL) * time.Second,
+		pathPrefix: config.PathPrefix,
+		debug:      config.Debug,
 	}, nil
 }
 
@@ -71,9 +75,9 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	owner, repo, err := extractOwnerAndRepo(req.URL.Path)
+	owner, repo, err := extractOwnerAndRepo(req.URL.Path, g.pathPrefix)
 	if err != nil {
-		g.httpError(rw, req, "Invalid path, expected /<owner>/<repo>/...", http.StatusBadRequest)
+		g.httpError(rw, req, fmt.Sprintf("Invalid path, expected <pathPrefix>/<owner>/<repo>/...: %s", err.Error()), http.StatusBadRequest)
 		return
 	}
 
@@ -128,8 +132,11 @@ func (g *RepoAuthz) httpError(rw http.ResponseWriter, req *http.Request, error s
 }
 
 // Extract owner and repository from the request path
-func extractOwnerAndRepo(path string) (string, string, error) {
-	parts := strings.Split(strings.Trim(path, "/"), "/")
+func extractOwnerAndRepo(path, prefix string) (string, string, error) {
+	if !strings.HasPrefix(path, prefix) {
+		return "", "", fmt.Errorf("path is missing prefix %s", prefix)
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(path, prefix), "/"), "/")
 	if len(parts) < 2 {
 		return "", "", fmt.Errorf("path too short")
 	}
