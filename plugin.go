@@ -3,6 +3,7 @@ package traefik_plugin_gh_repo_authz
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -93,8 +94,8 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	// Not in cache, check GitHub API
 	authorized, err := g.checkRepoAccess(g.githubAPI, token, owner, repo)
-	if err != nil {
-		g.httpError(rw, req, fmt.Sprintf("GitHub API error: %v", err), http.StatusInternalServerError)
+	if err != nil && !errors.Is(err, ErrGitHubAPIAccessDenied) {
+		g.httpError(rw, req, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -109,7 +110,7 @@ func (g *RepoAuthz) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	if authorized {
 		g.next.ServeHTTP(rw, req)
 	} else {
-		g.httpError(rw, req, "Forbidden", http.StatusForbidden)
+		g.httpError(rw, req, err.Error(), http.StatusForbidden)
 	}
 }
 
@@ -135,13 +136,17 @@ func extractOwnerAndRepo(path string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
+var ErrGitHubAPIAccessDenied = errors.New("GitHub API response")
+
 // Check if a token has access to a repository through the GitHub API.
+// If the error is ErrGitHubAPIAccessDenied, the request was successful but the GitHub API
+// returned 403 or 404
 func (g *RepoAuthz) checkRepoAccess(githubApi, token, owner, repo string) (bool, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s", githubApi, owner, repo)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("HTTP request error: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -158,7 +163,7 @@ func (g *RepoAuthz) checkRepoAccess(githubApi, token, owner, repo string) (bool,
 	case http.StatusOK:
 		return true, nil
 	case http.StatusNotFound, http.StatusForbidden:
-		return false, nil
+		return false, fmt.Errorf("%w: %d", ErrGitHubAPIAccessDenied, resp.StatusCode)
 	default:
 		var githubErr map[string]any
 		_ = json.NewDecoder(resp.Body).Decode(&githubErr)
